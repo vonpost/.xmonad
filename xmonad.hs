@@ -10,9 +10,11 @@ import XMonad.Hooks.EwmhDesktops
 import XMonad.Layout.Tabbed
 import XMonad.Hooks.SetWMName
 import XMonad.Hooks.ManageHelpers
-import XMonad.Util.Scratchpad
+import XMonad.Util.NamedScratchpad
 import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
+import XMonad.Layout.IndependentScreens
+
 
 main :: IO ()
 main =
@@ -29,7 +31,7 @@ myConfig = ewmh def
   , layoutHook         = spacingRaw True (Border 10 10 10 10) True (Border 10 10 10 10) True
                          $ hiddenWindows emptyBSP 
   , modMask            = mod4Mask
-  , manageHook         = manageSpawn <+> manageHook def <+> scratchpadManageHookDefault <+> fullscreenManageHook  
-  , terminal           = "urxvtc"
-  , workspaces         = [ "browse", "code", "read", "chat", "etc"]
+  , manageHook         = manageSpawn <+> manageHook def <+> (namedScratchpadManageHook myScratchpads) <+> fullscreenManageHook
+  , terminal           = "alacrittyc"
+  , workspaces         = withScreens 2 [ "browse", "code", "read", "chat", "etc"]
   }
