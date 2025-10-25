@@ -34,6 +34,7 @@ import Graphics.X11.ExtraTypes.XF86
 import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
 import XMonad.Actions.OnScreen
+import MyPywal (pywalPrepareWorkspace)
 
 import qualified XMonad.Util.ExtensibleState as XS
 myKeys = customKeys removedKeys addedKeys
@@ -109,11 +110,11 @@ addedKeys conf@XConfig {modMask = modm} =
   , ((modm, xK_j), windowGo D False)
 
     -- Go to workspace, show which one
-  , ((modm, xK_1), sequence_ [onCurrentScreenX toggleOrView "browse", spawn "notify-send \"space 1\""])
-  , ((modm, xK_2), sequence_ [onCurrentScreenX toggleOrView "code"  , spawn "notify-send \"space 2\""  ])
-  , ((modm, xK_3), sequence_ [onCurrentScreenX toggleOrView "read"  , spawn "notify-send \"space 3\""  ])
-  , ((modm, xK_4), sequence_ [onCurrentScreenX toggleOrView "chat"  , spawn "notify-send \"space 4\""  ])
-  , ((modm, xK_5), sequence_ [onCurrentScreenX toggleOrView "etc"   , spawn "notify-send \"space 5\""   ])
+  , ((modm, xK_1), goToWorkspace "browse" "browse")
+  , ((modm, xK_2), goToWorkspace "code"   "code")
+  , ((modm, xK_3), goToWorkspace "read"   "read")
+  , ((modm, xK_4), goToWorkspace "chat"   "chat")
+  , ((modm, xK_5), goToWorkspace "etc"    "etc")
 
   -- Cycle screens
 
@@ -162,6 +163,12 @@ addedKeys conf@XConfig {modMask = modm} =
       screenWorkspace sc
       -- flip whenJust (f >=> windows)
       warpToScreen sc (0.5) (0.5)
+    goToWorkspace name message =
+      sequence_
+        [ pywalPrepareWorkspace name
+        , onCurrentScreenX toggleOrView name
+        , spawn ("notify-send \"" ++ message ++ "\"")
+        ]
     screenKeys =
       [
       ((modm .|. controlMask, key),

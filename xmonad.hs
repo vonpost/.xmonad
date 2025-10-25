@@ -3,9 +3,9 @@ import XMonad
 import XMonad.Actions.Navigation2D
 import XMonad.Layout.Fullscreen hiding (fullscreenEventHook)
 import XMonad.Layout.BinarySpacePartition
-import XMonad.Layout.Spacing
 import XMonad.Actions.SpawnOn
 import MyKeyBindings
+import MyPywal
 import XMonad.Hooks.EwmhDesktops 
 import XMonad.Layout.Tabbed
 import XMonad.Hooks.SetWMName
@@ -26,7 +26,8 @@ myConfig = ewmh def
   { borderWidth        = 0
   , focusedBorderColor = "#002fa7"
   , normalBorderColor = "#002fa7"
-  , startupHook = startupHook def <+> setWMName "LG3D"
+  , startupHook = startupHook def <+> setWMName "LG3D" <+> pywalStartupHook
+  , logHook = logHook def <+> pywalLogHook
   , handleEventHook = handleEventHook def <+> fullscreenEventHook
   , focusFollowsMouse  = False
   , keys               = myKeys
