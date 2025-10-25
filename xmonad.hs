@@ -24,6 +24,8 @@ main =
 
 myConfig = ewmh def
   { borderWidth        = 0
+  , focusedBorderColor = "#002fa7"
+  , normalBorderColor = "#002fa7"
   , startupHook = startupHook def <+> setWMName "LG3D"
   , handleEventHook = handleEventHook def <+> fullscreenEventHook
   , focusFollowsMouse  = False
