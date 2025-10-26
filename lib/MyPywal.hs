@@ -27,7 +27,7 @@ workspaceWallpapers :: WalTargets
 workspaceWallpapers =
   -- Set one wallpaper per workspace; add/remove entries as needed.
   M.fromList
-    [ ("browse", wallpaperDir </> "tennis.jpg")
+    [ ("browse", wallpaperDir </> "y2k1.jpg")
     , ("code"  , wallpaperDir </> "clockwork.jpg")
     , ("read"  , wallpaperDir </> "eye")
     , ("chat"  , wallpaperDir </> "catupscale.png")
@@ -89,9 +89,10 @@ baseWorkspaceName ws =
 
 applyWalTheme :: FilePath -> X ()
 applyWalTheme wallpaper = do
-  runQuiet "wal" ["-q", "-n", "-i", wallpaper]
+  runQuiet "wallust" ["-q", "run", "--check-contrast", wallpaper]
   applyWallpaper wallpaper
-  safeSpawn "bash" ["/home/dcol/dotfiles/scripts/set_wal"]
+  spawn "emacsclient --eval \"(load-theme 'ewal-doom-one)\""
+  spawn "qutebrowser --nowindow \":config-source colors.py\""
 
 applyWallpaper :: FilePath -> X ()
 applyWallpaper wallpaper =
