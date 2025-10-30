@@ -91,8 +91,8 @@ applyWalTheme :: FilePath -> X ()
 applyWalTheme wallpaper = do
   runQuiet "wallust" ["-q", "run", "--check-contrast", wallpaper]
   applyWallpaper wallpaper
-  spawn "emacsclient --eval \"(load-theme 'ewal-doom-one)\""
-  spawn "qutebrowser --nowindow \":config-source colors.py\""
+  --spawn "emacsclient --eval \"(load-theme 'ewal-doom-one)\""
+  --spawn "qutebrowser --nowindow \":config-source colors.py\""
 
 applyWallpaper :: FilePath -> X ()
 applyWallpaper wallpaper =
