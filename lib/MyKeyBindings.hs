@@ -35,7 +35,13 @@ import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
 import XMonad.Actions.OnScreen
 --import MyPywal (pywalPrepareWorkspace)
-import XMonad.Actions.GridSelect
+import MyWindowHints
+  ( ColorSpec(..)
+  , HintConfig(..)
+  , ModeColorSpec(..)
+  , defaultHintConfig
+  , windowHints
+  )
 
 import qualified XMonad.Util.ExtensibleState as XS
 myKeys = customKeys removedKeys addedKeys
@@ -59,9 +65,16 @@ myScratchpads =
         h = 0.28   -- 38% height (thin “quake bar”)
         l = (1 - w)/2
         t = 0.38   -- top of the screen
-myGSConfig colorizer = (buildDefaultGSConfig colorizer) {
-    gs_windowAtts = M.fromList [("_GRIDSELECT_WINDOW", "1")]
-}
+
+windowHintConfig :: HintConfig
+windowHintConfig =
+  -- Tweak the leader, font, or colors here if you want a different look.
+  defaultHintConfig
+    { hcLeaderKey = xK_semicolon
+    , hcFocusColors = ModeColorSpec (ColorName "#282a36") (ColorName "#bd93f9")
+    , hcSwapColors = ModeColorSpec (ColorName "#bd93f9") (ColorName "#f8f8f2")
+    , hcFontName = Just "-misc-fixed-bold-r-normal--18-120-100-100-c-90-iso8859-1"
+    }
 
 removedKeys :: XConfig l -> [(KeyMask, KeySym)]
 removedKeys XConfig {modMask = modm} =
@@ -87,8 +100,8 @@ addedKeys conf@XConfig {modMask = modm} =
   , ((modm, xK_Left), decScreenWindowSpacing 10)
   , ((modm, xK_Up), toggleScreenSpacingEnabled >> toggleWindowSpacingEnabled)
 
-  -- Grid select
-  , ((modm, xK_g), goToSelected (myGSConfig def))
+  -- Window hints
+  , ((modm, xK_g), windowHints windowHintConfig)
 
 
     -- Switch to last workspace
