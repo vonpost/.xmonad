@@ -70,7 +70,7 @@ windowHintConfig :: HintConfig
 windowHintConfig =
   -- Tweak the leader, font, or colors here if you want a different look.
   defaultHintConfig
-    { hcLeaderKey = xK_semicolon
+    { hcLeaderKey = xK_space
     , hcFocusColors = ModeColorSpec (ColorName "#282a36") (ColorName "#bd93f9")
     , hcSwapColors = ModeColorSpec (ColorName "#bd93f9") (ColorName "#f8f8f2")
     , hcFontName = Just "-misc-fixed-bold-r-normal--18-120-100-100-c-90-iso8859-1"
