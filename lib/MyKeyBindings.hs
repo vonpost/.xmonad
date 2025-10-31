@@ -34,6 +34,7 @@ import Graphics.X11.ExtraTypes.XF86
 import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
 import XMonad.Actions.OnScreen
+import XMonad.Actions.GeometrySelect (geometrySelect, defaultGSConfig)
 --import MyPywal (pywalPrepareWorkspace)
 import MyWindowHints
   ( ColorSpec(..)
@@ -105,7 +106,7 @@ addedKeys conf@XConfig {modMask = modm} =
 
 
     -- Switch to last workspace
-  , ((modm, xK_Tab), toggleWS)
+  , ((modm, xK_Tab), geometrySelect defaultGSConfig)
   , ((modm, xK_u), toggleHidden)
   , ((modm, xK_b), withFocused hideWindow)
   , ((modm, xK_n), popNewestHiddenWindow)
