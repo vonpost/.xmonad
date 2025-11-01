@@ -16,6 +16,7 @@ import XMonad.Layout.Spacing
 import XMonad.Layout.IndependentScreens
 import XMonad.Layout.NoBorders
 
+
 main :: IO ()
 main =
   xmonad

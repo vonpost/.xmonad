@@ -34,7 +34,7 @@ import Graphics.X11.ExtraTypes.XF86
 import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
 import XMonad.Actions.OnScreen
-import XMonad.Actions.GeometrySelect (geometrySelect, defaultGSConfig)
+import XMonad.Actions.GeometrySelect --(geometrySelect, defaultGSConfig, GSConfig)
 --import MyPywal (pywalPrepareWorkspace)
 import MyWindowHints
   ( ColorSpec(..)
@@ -77,6 +77,13 @@ windowHintConfig =
     , hcFontName = Just "-misc-fixed-bold-r-normal--18-120-100-100-c-90-iso8859-1"
     }
 
+myGSConfig = defaultGSConfig
+  { bgColor =  "#282a36"
+  , fgColor =  "#ff79c6"
+  , accentColor = "#584b83"
+  , inactiveColor = "#44475a"
+  }
+
 removedKeys :: XConfig l -> [(KeyMask, KeySym)]
 removedKeys XConfig {modMask = modm} =
     [--(modm              , xK_space)  -- Default for layout switching
@@ -106,7 +113,7 @@ addedKeys conf@XConfig {modMask = modm} =
 
 
     -- Switch to last workspace
-  , ((modm, xK_Tab), geometrySelect defaultGSConfig)
+  , ((modm, xK_Tab), geometrySelect myGSConfig)
   , ((modm, xK_u), toggleHidden)
   , ((modm, xK_b), withFocused hideWindow)
   , ((modm, xK_n), popNewestHiddenWindow)
