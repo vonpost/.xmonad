@@ -160,7 +160,7 @@ defaultGSConfig =
     , accentColor = "#6272a4"
     , inactiveColor = "#44475a"
     , workspaceGap = 48
-    , padding = 16
+    , padding = 32
     , fontName = "Sans-10"
     }
 
@@ -883,10 +883,10 @@ renderHints cfg env layout currentIndex hintItems state = do
         let statusText = modeLabel mode ++ statusSuffix prefix
             statusX = fromIntegral pad
             statusY = fromIntegral pad + ascent
-            infoText = "Leader toggles focus/swap"
-            infoY = statusY + ascent + 4
+            -- infoText = "Leader toggles focus/swap"
+            -- infoY = statusY + ascent + 4
         xftDrawString draw accentText font statusX statusY statusText
-        xftDrawString draw fgText font statusX infoY infoText
+        -- xftDrawString draw fgText font statusX infoY infoText
   presentBuffer env
   where
     statusSuffix p
