@@ -306,14 +306,14 @@ workspaceSlidePrepare targetBase =
     case (lookupIndex currentBase, lookupIndex targetBase) of
       (Just currentIdx, Just targetIdx)
         | currentBase /= targetBase -> do
-            let (outgoingVal, incomingVal) =
+            let direction =
                   if targetIdx > currentIdx
-                    then (1, 2)
-                    else (2, 1)
+                    then 2
+                    else 1
                 currentWins = workspaceWindows currentTag ws
                 targetWins = workspaceWindows targetTag ws
-            outgoingPairs <- setSwitchProperty outgoingVal currentWins
-            incomingPairs <- setSwitchProperty incomingVal targetWins
+            outgoingPairs <- setSwitchProperty direction currentWins
+            incomingPairs <- setSwitchProperty direction targetWins
             let cleanupPairs = outgoingPairs ++ incomingPairs
             pure (scheduleSlideCleanup cleanupPairs)
       _ -> pure (pure ())
@@ -354,7 +354,7 @@ scheduleSlideCleanup winVals =
       Just tid -> io $ killThread tid
       Nothing -> pure ()
     tid <- io . forkIO $ do
-      threadDelay 300000
+      threadDelay 350000
       mapM_
         (\(w, expectedVal) -> do
             mProp <- getWindowProperty32 dpy w atom
