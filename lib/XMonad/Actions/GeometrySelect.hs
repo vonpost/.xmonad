@@ -9,10 +9,10 @@ import Control.Monad (forM, when)
 import Data.Bits ((.&.), (.|.), shiftL)
 import Data.Char (chr, isPrint, toLower)
 import Data.Function (on)
-import Data.List (find, findIndex, foldl', groupBy, isPrefixOf, maximumBy, minimumBy)
+import Data.List (find, findIndex, foldl', groupBy, intercalate, isPrefixOf, maximumBy, minimumBy)
 import Data.Maybe (catMaybes, fromMaybe)
 import Data.Ord (comparing)
-import Data.Word (Word8)
+import Data.Word (Word32, Word8)
 import qualified Data.Map.Strict as M
 import Foreign.Marshal.Alloc (alloca)
 import Graphics.X11.Xlib
@@ -27,6 +27,10 @@ data GSConfig = GSConfig
   , fgColor :: !String
   , accentColor :: !String
   , inactiveColor :: !String
+  , modelineBgColor :: !String
+  , modelineFgColor :: !String
+  , modelineHeight :: !Int
+  , overlayOpacity :: !Double
   , workspaceGap :: !Int
   , padding :: !Int
   , fontName :: !String
@@ -135,6 +139,8 @@ data OverlayColors = OverlayColors
   , colorFg :: !Pixel
   , colorAccent :: !Pixel
   , colorInactive :: !Pixel
+  , colorModelineBg :: !Pixel
+  , colorModelineFg :: !Pixel
   , colorAllocated :: ![Pixel]
   }
 
@@ -159,6 +165,10 @@ defaultGSConfig =
     , fgColor = "#f8f8f2"
     , accentColor = "#6272a4"
     , inactiveColor = "#44475a"
+    , modelineBgColor = "#1d1f27"
+    , modelineFgColor = "#f8f8f2"
+    , modelineHeight = 32
+    , overlayOpacity = 0.95
     , workspaceGap = 48
     , padding = 32
     , fontName = "Sans-10"
@@ -171,12 +181,13 @@ geometrySelect cfg = withWindowSet $ \ws ->
     case concatWorkspaces cfg rawItems of
       Nothing -> pure ()
       Just layout -> do
+        let focusedWorkspace = W.currentTag ws
         let atlasItems = layoutItems layout
         let focused = W.peek ws
             initialIndex =
               fromMaybe 0 $
                 focused >>= \w -> findIndex (\it -> itemWindow it == w) atlasItems
-        selection <- io $ runOverlay cfg dpy layout initialIndex
+        selection <- io $ runOverlay cfg dpy focusedWorkspace layout initialIndex
         case selection of
           Just (SelectionFocus chosen) -> do
             windows (W.view (itemWorkspace chosen))
@@ -196,25 +207,28 @@ collectWindows dpy ws = do
   fmap concat $
     forM orderedWorkspaces $ \workspace -> do
       let tag = W.tag workspace
-          wins = W.integrate' (W.stack workspace)
-          onCurrent = tag == currentTag
-      fmap catMaybes $
-        forM wins $ \win -> do
-          attrsResult <- io $ try (getWindowAttributes dpy win)
-          case attrsResult of
-            Left (_ :: SomeException) -> pure Nothing
-            Right attrs -> do
-              title <- io (getWindowTitle dpy win)
-              let rect = rectFromAttributes attrs
-              pure $
-                Just
-                  RawItem
-                    { rawWorkspace = tag
-                    , rawWindow = win
-                    , rawRect = rect
-                    , rawTitle = title
-                    , rawCurrent = onCurrent
-                    }
+      if tag == "NSP"
+        then pure []
+        else do
+          let wins = W.integrate' (W.stack workspace)
+              onCurrent = tag == currentTag
+          fmap catMaybes $
+            forM wins $ \win -> do
+              attrsResult <- io $ try (getWindowAttributes dpy win)
+              case attrsResult of
+                Left (_ :: SomeException) -> pure Nothing
+                Right attrs -> do
+                  title <- io (getWindowTitle dpy win)
+                  let rect = rectFromAttributes attrs
+                  pure $
+                    Just
+                      RawItem
+                        { rawWorkspace = tag
+                        , rawWindow = win
+                        , rawRect = rect
+                        , rawTitle = title
+                        , rawCurrent = onCurrent
+                        }
 
 concatWorkspaces :: GSConfig -> [RawItem] -> Maybe AtlasLayout
 concatWorkspaces cfg items
@@ -413,10 +427,11 @@ scaleWorkspaceInfo factor pad info =
 runOverlay ::
   GSConfig ->
   Display ->
+  WorkspaceId ->
   AtlasLayout ->
   Int ->
   IO (Maybe Selection)
-runOverlay cfg dpy layout initialIndex = do
+runOverlay cfg dpy focusedWorkspace layout initialIndex = do
   let items = layoutItems layout
       workspaceInfos = layoutWorkspaces layout
       layoutWidth' = max 1 (layoutWidth layout)
@@ -434,9 +449,11 @@ runOverlay cfg dpy layout initialIndex = do
       scaledWidth = max 1 (ceiling (fromIntegral layoutWidth' * scale))
       scaledHeight = max 1 (ceiling (fromIntegral layoutHeight' * scale))
       pad = padding cfg
+      modelineH = max 1 (modelineHeight cfg)
       overlayWidth = scaledWidth + pad * 2
-      overlayHeight = scaledHeight + pad * 2
-      offsetItems = translateAtlasItems pad pad . scaleAtlasItems scale $ items
+      overlayHeight = scaledHeight + pad * 2 + modelineH
+      offsetItems =
+        translateAtlasItems pad pad . scaleAtlasItems scale $ items
       scaledInfos = map (scaleWorkspaceInfo scale pad) workspaceInfos
       scaledLayout =
         layout
@@ -458,10 +475,11 @@ runOverlay cfg dpy layout initialIndex = do
         | initialIndex < 0 = 0
         | initialIndex >= length items' = 0
         | otherwise = initialIndex
-  renderOverlay cfg env items' safeIndex
+  let initialMode = HintModeFocus
+  renderOverlay cfg env scaledLayout focusedWorkspace initialMode safeIndex
   result <-
     finally
-      (runLoop cfg env scaledLayout safeIndex)
+      (runLoop cfg env scaledLayout focusedWorkspace initialMode safeIndex)
       (teardownOverlay env)
   pure result
 
@@ -493,6 +511,7 @@ setupOverlay cfg dpy width height posX posY = do
             cWColormap .|.
             cWBackPixel
       createWindow dpy root posX posY width height 0 depth inputOutput visual mask attrs
+  setWindowOpacity cfg dpy win
   pixmap <- createPixmap dpy win width height depth
   gc <- createGC dpy win
   draw <- xftDrawCreate dpy pixmap visual cmap
@@ -514,6 +533,14 @@ setupOverlay cfg dpy width height posX posY = do
       , oeHeight = height
       , oePixmap = pixmap
       }
+
+setWindowOpacity :: GSConfig -> Display -> Window -> IO ()
+setWindowOpacity cfg dpy win = do
+  opacityAtom <- internAtom dpy "_NET_WM_WINDOW_OPACITY" False
+  let clamped = max 0 (min 1 (overlayOpacity cfg))
+      maxOpacity = 0xFFFFFFFF :: Word32
+      value = round (clamped * fromIntegral maxOpacity) :: Word32
+  changeProperty32 dpy win opacityAtom cARDINAL propModeReplace [fromIntegral value]
 
 teardownOverlay :: OverlayEnv -> IO ()
 teardownOverlay env = do
@@ -548,12 +575,16 @@ resolveColors cfg dpy screenNum _ cmap = do
   (fg, fgOwned) <- resolvePixel dpy screenNum cmap (fgColor cfg) (whitePixel dpy screenNum)
   (accent, accentOwned) <- resolvePixel dpy screenNum cmap (accentColor cfg) fg
   (inactive, inactiveOwned) <- resolvePixel dpy screenNum cmap (inactiveColor cfg) fg
+  (modelineBg, modelineBgOwned) <- resolvePixel dpy screenNum cmap (modelineBgColor cfg) bg
+  (modelineFg, modelineFgOwned) <- resolvePixel dpy screenNum cmap (modelineFgColor cfg) fg
   let ownedPixels =
         concat
           [ if bgOwned then [bg] else []
           , if fgOwned then [fg] else []
           , if accentOwned then [accent] else []
           , if inactiveOwned then [inactive] else []
+          , if modelineBgOwned then [modelineBg] else []
+          , if modelineFgOwned then [modelineFg] else []
           ]
   pure
     OverlayColors
@@ -561,6 +592,8 @@ resolveColors cfg dpy screenNum _ cmap = do
       , colorFg = fg
       , colorAccent = accent
       , colorInactive = inactive
+      , colorModelineBg = modelineBg
+      , colorModelineFg = modelineFg
       , colorAllocated = ownedPixels
       }
 resolvePixel :: Display -> ScreenNumber -> Colormap -> String -> Pixel -> IO (Pixel, Bool)
@@ -578,9 +611,17 @@ loadFont cfg dpy screenObj = do
     Right font -> pure font
     Left (_ :: SomeException) -> xftFontOpen dpy screenObj "fixed"
 
-renderOverlay :: GSConfig -> OverlayEnv -> [AtlasItem] -> Int -> IO ()
-renderOverlay cfg env items selectedIndex = do
+renderOverlay :: GSConfig -> OverlayEnv -> AtlasLayout -> WorkspaceId -> HintMode -> Int -> IO ()
+renderOverlay cfg env layout focusedWorkspace _currentMode selectedIndex = do
+  let items = layoutItems layout
+      hoverTag = fromMaybe "-" (selectedWorkspace items selectedIndex)
+      segments =
+        [ "Hover: " ++ hoverTag
+        , "Focused: " ++ focusedWorkspace
+        ]
+      modelineText = intercalate "  |  " segments
   drawAtlas cfg env items selectedIndex
+  drawModeline cfg env modelineText
   presentBuffer env
 
 drawAtlas :: GSConfig -> OverlayEnv -> [AtlasItem] -> Int -> IO ()
@@ -598,45 +639,59 @@ drawAtlas cfg env items selectedIndex = do
       width = oeWidth env
       height = oeHeight env
   ascent <- xftfont_ascent font
+  descent <- xftfont_descent font
+  ellipsisGlyph <- xftTextExtents dpy font "..."
+  let ellipsisWidth = fromIntegral (xglyphinfo_xOff ellipsisGlyph)
+      contentInset = max 8 (pad `div` 4)
+      textPadding = max 6 (pad `div` 6)
+      fontHeight = ascent + descent
+      minContentWidth = max 16 (textPadding * 2 + ellipsisWidth)
+      minContentHeight = max 16 (textPadding * 2 + fontHeight)
   setForeground dpy gc (colorBg colors)
   fillRectangle dpy pix gc 0 0 width height
   withXftColorName dpy visual cmap (fgColor cfg) $ \txtColor -> do
-    mapM_ (drawItem dpy pix gc draw font colors cfg ascent txtColor) items
-    when (selectedIndex >= 0 && selectedIndex < length items) $ do
-      let rect = itemRect (items !! selectedIndex)
-          highlightRect = innerRectangle pad rect
-      setForeground dpy gc borderPixel
-      setLineAttributes dpy gc 2 lineSolid capButt joinMiter
-      drawRectangle dpy pix gc
-        (fromIntegral (rect_x highlightRect) :: Position)
-        (fromIntegral (rect_y highlightRect) :: Position)
-        (rect_width highlightRect)
-        (rect_height highlightRect)
-      setLineAttributes dpy gc 0 lineSolid capButt joinMiter
+    mapM_ (uncurry (drawItem dpy pix gc draw font colors cfg ascent txtColor contentInset textPadding minContentWidth minContentHeight borderPixel selectedIndex)) (zip [0 ..] items)
   where
-    drawItem dpy pix gc draw font colors cfg ascent txtColor item = do
+    drawItem dpy pix gc draw font colors cfg ascent txtColor contentInset textPadding minContentWidth minContentHeight borderPixel selectedIdx idx item = do
       let rect = itemRect item
-          pad = padding cfg
-          fillRect = innerRectangle pad rect
-          innerX = rectLeft fillRect
-          innerY = rectTop fillRect
-          innerW = fromIntegral (rect_width fillRect) :: Int
-          innerH = fromIntegral (rect_height fillRect) :: Int
+          fillRectBase = innerRectangle contentInset rect
+          baseW = fromIntegral (rect_width fillRectBase) :: Int
+          baseH = fromIntegral (rect_height fillRectBase) :: Int
+          contentW = max minContentWidth baseW
+          contentH = max minContentHeight baseH
+          adjustedRect =
+            fillRectBase
+              { rect_width = fromIntegral contentW
+              , rect_height = fromIntegral contentH
+              }
+          originX = rectLeft adjustedRect
+          originY = rectTop adjustedRect
+          availableWidth = max 1 (contentW - textPadding * 2)
+          maxBaseline = originY + contentH - textPadding
+          textBaseline = min maxBaseline (originY + textPadding + ascent)
+          textX = originX + textPadding
           fillPixel =
             if itemOnCurrent item
               then colorAccent colors
               else colorInactive colors
-          textBaseline =
-            min (innerY + innerH - 1) (innerY + pad + ascent)
-          textX = innerX + pad
-          textWidth = max 1 (innerW - pad)
+          rectX = fromIntegral (rect_x adjustedRect) :: Position
+          rectY = fromIntegral (rect_y adjustedRect) :: Position
+          rectW = rect_width adjustedRect
+          rectH = rect_height adjustedRect
+          borderWidthDim = fromIntegral (max 1 (contentW - 1)) :: Dimension
+          borderHeightDim = fromIntegral (max 1 (contentH - 1)) :: Dimension
       setForeground dpy gc fillPixel
       fillRectangle dpy pix gc
-        (fromIntegral (rect_x fillRect) :: Position)
-        (fromIntegral (rect_y fillRect) :: Position)
-        (rect_width fillRect)
-        (rect_height fillRect)
-      title <- prepareTitle dpy font textWidth (itemTitle item)
+        rectX
+        rectY
+        rectW
+        rectH
+      when (idx == selectedIdx) $ do
+        setForeground dpy gc borderPixel
+        setLineAttributes dpy gc 2 lineSolid capButt joinMiter
+        drawRectangle dpy pix gc rectX rectY borderWidthDim borderHeightDim
+        setLineAttributes dpy gc 0 lineSolid capButt joinMiter
+      title <- prepareTitle dpy font availableWidth (itemTitle item)
       xftDrawString
         draw
         txtColor
@@ -644,6 +699,58 @@ drawAtlas cfg env items selectedIndex = do
         (fromIntegral textX :: Int)
         (fromIntegral textBaseline :: Int)
         title
+
+selectedWorkspace :: [AtlasItem] -> Int -> Maybe WorkspaceId
+selectedWorkspace items idx
+  | idx < 0 = Nothing
+  | idx >= length items = Nothing
+  | otherwise = Just (itemWorkspace (items !! idx))
+
+drawModeline :: GSConfig -> OverlayEnv -> String -> IO ()
+drawModeline cfg env text = do
+  let dpy = oeDisplay env
+      gc = oeGC env
+      draw = oeDraw env
+      font = oeFont env
+      colors = oeColors env
+      visual = oeVisual env
+      cmap = oeColormap env
+      widthDim = oeWidth env
+      heightDim = oeHeight env
+      modelineH = max 1 (modelineHeight cfg)
+      widthInt = fromIntegral widthDim :: Int
+      heightInt = fromIntegral heightDim :: Int
+      modelineTop = max 0 (heightInt - modelineH)
+      horizontalPad = max 10 (padding cfg `div` 3)
+  ascent <- xftfont_ascent font
+  descent <- xftfont_descent font
+  let contentHeight = ascent + descent
+      verticalSpace = max 0 (modelineH - contentHeight)
+      padYLimit = max 0 (modelineH - contentHeight)
+      padYCandidate = max 2 (verticalSpace `div` 2)
+      padY = min padYCandidate padYLimit
+      baselineRaw = modelineTop + padY + ascent
+      minBaseline = modelineTop + ascent
+      maxBaseline = modelineTop + modelineH - max 1 (descent + padY)
+      baseline = max minBaseline (min baselineRaw maxBaseline)
+      availableWidth = max 1 (widthInt - horizontalPad * 2)
+      pix = oePixmap env
+      modelineTopPos = fromIntegral modelineTop :: Position
+      modelineHeightDim = fromIntegral modelineH :: Dimension
+  setForeground dpy gc (colorModelineBg colors)
+  fillRectangle dpy pix gc 0 modelineTopPos widthDim modelineHeightDim
+  let widthPos = fromIntegral (max 0 (widthInt - 1)) :: Position
+  setForeground dpy gc (colorModelineFg colors)
+  drawLine dpy pix gc 0 modelineTopPos widthPos modelineTopPos
+  prepared <- prepareTitle dpy font availableWidth text
+  withXftColorName dpy visual cmap (modelineFgColor cfg) $ \modelineFg ->
+    xftDrawString
+      draw
+      modelineFg
+      font
+      (fromIntegral horizontalPad :: Int)
+      (fromIntegral baseline :: Int)
+      prepared
 
 presentBuffer :: OverlayEnv -> IO ()
 presentBuffer env = do
@@ -688,28 +795,30 @@ runLoop ::
   GSConfig ->
   OverlayEnv ->
   AtlasLayout ->
+  WorkspaceId ->
+  HintMode ->
   Int ->
   IO (Maybe Selection)
-runLoop cfg env layout startIndex =
-  allocaXEvent $ \ev -> loop startIndex ev
+runLoop cfg env layout focusedWorkspace startMode startIndex =
+  allocaXEvent $ \ev -> loop startIndex startMode ev
   where
     dpy = oeDisplay env
     items = layoutItems layout
-    loop currentIndex evPtr = do
+    loop currentIndex currentMode evPtr = do
       nextEvent dpy evPtr
       event <- getEvent evPtr
       case event of
         ExposeEvent {} -> do
-          renderOverlay cfg env items currentIndex
-          loop currentIndex evPtr
+          renderOverlay cfg env layout focusedWorkspace currentMode currentIndex
+          loop currentIndex currentMode evPtr
         KeyEvent {ev_event_type = t, ev_keycode = code}
           | t == keyPress -> do
               keysym <- keycodeToKeysym dpy code 0
-              handleKey keysym currentIndex evPtr
-          | otherwise -> loop currentIndex evPtr
-        _ -> loop currentIndex evPtr
+              handleKey keysym currentIndex currentMode evPtr
+          | otherwise -> loop currentIndex currentMode evPtr
+        _ -> loop currentIndex currentMode evPtr
 
-    handleKey keysym currentIndex evPtr
+    handleKey keysym currentIndex currentMode evPtr
       | keysym == xK_Escape = pure Nothing
       | keysym == xK_Return || keysym == xK_KP_Enter =
           pure $
@@ -717,22 +826,22 @@ runLoop cfg env layout startIndex =
               then Nothing
               else Just (SelectionFocus (items !! currentIndex))
       | keysym == xK_g = do
-          hintResult <- runHintSession cfg env layout currentIndex atlasHintSettings
-          case hintResult of
+          (hintSelection, newMode) <- runHintSession cfg env layout focusedWorkspace currentIndex currentMode atlasHintSettings
+          case hintSelection of
             Just selection -> pure (Just selection)
             Nothing -> do
-              renderOverlay cfg env items currentIndex
-              loop currentIndex evPtr
-      | keysym == xK_h = move DirLeft currentIndex
-      | keysym == xK_l = move DirRight currentIndex
-      | keysym == xK_k = move DirUp currentIndex
-      | keysym == xK_j = move DirDown currentIndex
-      | otherwise = loop currentIndex evPtr
+              renderOverlay cfg env layout focusedWorkspace newMode currentIndex
+              loop currentIndex newMode evPtr
+      | keysym == xK_h = move DirLeft currentIndex currentMode
+      | keysym == xK_l = move DirRight currentIndex currentMode
+      | keysym == xK_k = move DirUp currentIndex currentMode
+      | keysym == xK_j = move DirDown currentIndex currentMode
+      | otherwise = loop currentIndex currentMode evPtr
       where
-        move dir idx = do
+        move dir idx modeState = do
           let nextIdx = navigate dir layout idx
-          renderOverlay cfg env items nextIdx
-          loop nextIdx evPtr
+          renderOverlay cfg env layout focusedWorkspace modeState nextIdx
+          loop nextIdx modeState evPtr
 
 data Direction = DirLeft | DirRight | DirUp | DirDown
 
@@ -770,11 +879,13 @@ runHintSession ::
   GSConfig ->
   OverlayEnv ->
   AtlasLayout ->
+  WorkspaceId ->
   Int ->
+  HintMode ->
   HintSettings ->
-  IO (Maybe Selection)
-runHintSession cfg env layout currentIndex settings
-  | null hintItems = pure Nothing
+  IO (Maybe Selection, HintMode)
+runHintSession cfg env layout focusedWorkspace currentIndex initialMode settings
+  | null hintItems = pure (Nothing, initialMode)
   | otherwise = allocaXEvent $ \ev -> loop initialState ev
   where
     dpy = oeDisplay env
@@ -783,10 +894,10 @@ runHintSession cfg env layout currentIndex settings
     alphabet = if null rawAlphabet then map toLower defaultHintAlphabet else rawAlphabet
     alphabetChars = alphabet
     hintItems = assignHints alphabet (layoutItems layout)
-    initialState = HintState "" HintModeFocus
+    initialState = HintState "" initialMode
 
     loop state evPtr = do
-      renderHints cfg env layout currentIndex hintItems state
+      renderHints cfg env layout focusedWorkspace currentIndex hintItems state
       nextEvent dpy evPtr
       event <- getEvent evPtr
       case event of
@@ -795,8 +906,8 @@ runHintSession cfg env layout currentIndex settings
           | t == keyPress -> do
               keysym <- keycodeToKeysym dpy code 0
               case stepHint state keysym of
-                HintResultCancel -> pure Nothing
-                HintResultFinish sel -> pure (Just sel)
+                HintResultCancel -> pure (Nothing, hsMode state)
+                HintResultFinish sel -> pure (Just sel, hsMode state)
                 HintResultContinue newState -> loop newState evPtr
           | otherwise -> loop state evPtr
         _ -> loop state evPtr
@@ -847,56 +958,83 @@ renderHints ::
   GSConfig ->
   OverlayEnv ->
   AtlasLayout ->
+  WorkspaceId ->
   Int ->
   [HintItem] ->
   HintState ->
   IO ()
-renderHints cfg env layout currentIndex hintItems state = do
+renderHints cfg env layout focusedWorkspace currentIndex hintItems state = do
   let items = layoutItems layout
       dpy = oeDisplay env
+      gc = oeGC env
+      pix = oePixmap env
       draw = oeDraw env
       font = oeFont env
       visual = oeVisual env
       cmap = oeColormap env
+      colors = oeColors env
       pad = padding cfg
       prefix = hsPrefix state
       mode = hsMode state
+  let hoverTag = fromMaybe "-" (selectedWorkspace items currentIndex)
+      baseSegments =
+        [ "Hover: " ++ hoverTag
+        , "Focused: " ++ focusedWorkspace
+        ]
+      extraSegments =
+        if null prefix
+          then []
+          else ["Keys: " ++ prefix]
+      modelineText = intercalate "  |  " (baseSegments ++ extraSegments)
       matches = filter (isPrefixOf prefix . fst) hintItems
       matchLabels = map fst matches
       exactLabels = filter (== prefix) matchLabels
   drawAtlas cfg env items currentIndex
   ascent <- xftfont_ascent font
+  descent <- xftfont_descent font
+  let hintPadding = max 4 (pad `div` 6)
+      hintBorderWidth = 2
+      baseHintHeight = ascent + descent + hintPadding * 2
+      minHintWidth = hintPadding * 2 + 12
   withXftColorName dpy visual cmap (fgColor cfg) $ \fgText ->
     withXftColorName dpy visual cmap (accentColor cfg) $ \accentText ->
       withXftColorName dpy visual cmap (inactiveColor cfg) $ \inactiveText -> do
         let drawHint (label, item) = do
               let rect = itemRect item
-                  x = rectLeft rect + pad
-                  y = rectTop rect + pad + ascent
+                  originX = rectLeft rect + pad
+                  originY = rectTop rect + pad
                   textColor
-                    | null prefix = fgText
                     | label `elem` exactLabels = accentText
                     | label `elem` matchLabels = fgText
+                    | null prefix = fgText
                     | otherwise = inactiveText
-              xftDrawString draw textColor font (fromIntegral x) (fromIntegral y) label
+              glyph <- xftTextExtents dpy font label
+              let textWidth = fromIntegral (xglyphinfo_xOff glyph)
+                  boxWidth = max minHintWidth (textWidth + hintPadding * 2)
+                  boxHeight = baseHintHeight
+                  boxX = fromIntegral originX :: Position
+                  boxY = fromIntegral originY :: Position
+                  boxWidthDim = fromIntegral boxWidth :: Dimension
+                  boxHeightDim = fromIntegral boxHeight :: Dimension
+                  textX = originX + hintPadding
+                  textBaseline = originY + hintPadding + ascent
+                  fillPixel
+                    | label `elem` exactLabels = colorAccent colors
+                    | label `elem` matchLabels = colorBg colors
+                    | otherwise = colorInactive colors
+                  borderWidthDim = fromIntegral (max 1 (boxWidth - 1)) :: Dimension
+                  borderHeightDim = fromIntegral (max 1 (boxHeight - 1)) :: Dimension
+              setForeground dpy gc fillPixel
+              fillRectangle dpy pix gc boxX boxY boxWidthDim boxHeightDim
+              setLineAttributes dpy gc hintBorderWidth lineSolid capButt joinMiter
+              setForeground dpy gc (colorFg colors)
+              drawRectangle dpy pix gc boxX boxY borderWidthDim borderHeightDim
+              setLineAttributes dpy gc 0 lineSolid capButt joinMiter
+              xftDrawString draw textColor font (fromIntegral textX) (fromIntegral textBaseline) label
         mapM_ drawHint hintItems
-        let statusText = modeLabel mode ++ statusSuffix prefix
-            statusX = fromIntegral pad
-            statusY = fromIntegral pad + ascent
-            -- infoText = "Leader toggles focus/swap"
-            -- infoY = statusY + ascent + 4
-        xftDrawString draw accentText font statusX statusY statusText
-        -- xftDrawString draw fgText font statusX infoY infoText
+        drawModeline cfg env modelineText
   presentBuffer env
   where
-    statusSuffix p
-      | null p = ""
-      | otherwise = "  keys: " ++ p
-
-modeLabel :: HintMode -> String
-modeLabel HintModeFocus = "Mode: focus"
-modeLabel HintModeSwap = "Mode: swap"
-
 keysymToHintChar :: KeySym -> Maybe Char
 keysymToHintChar sym =
   case keysymToString sym of

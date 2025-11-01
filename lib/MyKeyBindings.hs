@@ -82,6 +82,10 @@ myGSConfig = defaultGSConfig
   , fgColor =  "#ff79c6"
   , accentColor = "#584b83"
   , inactiveColor = "#44475a"
+  , modelineHeight = 30
+  , modelineFgColor = "#ff79c6"
+  , modelineBgColor = "#282a36"
+  , overlayOpacity = 0.7
   }
 
 removedKeys :: XConfig l -> [(KeyMask, KeySym)]
