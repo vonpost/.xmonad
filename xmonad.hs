@@ -37,5 +37,5 @@ myConfig = ewmhFullscreen $ ewmh def
   , modMask            = mod4Mask
   , manageHook         = manageSpawn <+> manageHook def <+> (namedScratchpadManageHook myScratchpads) <+> fullscreenManageHook
   , terminal           = "alacrittyc"
-  , workspaces         = withScreens 2 [ "browse", "code", "read", "chat", "etc"]
+  , workspaces         = withScreens 1 [ "browse", "code", "read", "chat", "etc"]
   }

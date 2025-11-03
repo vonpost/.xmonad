@@ -47,6 +47,7 @@ import MyWindowHints
   , defaultHintConfig
   , windowHints
   )
+import XMonad.Hooks.WorkspaceSlide
 
 import qualified XMonad.Util.ExtensibleState as XS
 import qualified Graphics.X11.Xlib as X
@@ -146,7 +147,7 @@ addedKeys conf@XConfig {modMask = modm} =
     -- Layout switching
   --, ((modm .|. shiftMask, xK_t), sendMessage NextLayout)
   -- wow autojump
-  , ((modm, xK_o), spawn "sleep 0.2 && xdotool keydown period keyup period")
+  -- , ((modm, xK_o), spawn "sleep 0.2 && xdotool keydown period keyup period")
     -- Directional navigation of windows
   , ((modm, xK_l), windowGo R False)
   , ((modm, xK_h), windowGo L False)
@@ -205,14 +206,10 @@ addedKeys conf@XConfig {modMask = modm} =
   where
     action key sc = do
       screenWorkspace sc
-      -- flip whenJust (f >=> windows)
       warpToScreen sc (0.5) (0.5)
     goToWorkspace name message = do
-      cleanup <- workspaceSlidePrepare name
-      -- pywalPrepareWorkspace name
-      onCurrentScreenX toggleOrView name
+      workspaceSlidePrepare onCurrentScreenX toggleOrView name
       spawn ("notify-send \"" ++ message ++ "\"")
-      cleanup
     screenKeys =
       [
       ((modm .|. controlMask, key),
@@ -286,83 +283,3 @@ toggleLanguage = do status <- runProcessWithInput "setxkbmap" ["-query"] ""
                     let _:currentLanguage:_ = words . head . drop 2 $ lines status
                     let language:_ = filter (\x -> x /= currentLanguage) languages
                     spawn $ "setxkbmap " ++ language ++  " && notify-send \"" ++ language ++ "\""
-
-newtype SlideCleanupState = SlideCleanupState (Maybe ThreadId)
-
-instance ExtensionClass SlideCleanupState where
-  initialValue = SlideCleanupState Nothing
-
-workspaceOrder :: [VirtualWorkspace]
-workspaceOrder = ["browse", "code", "read", "chat", "etc"]
-
-workspaceSlidePrepare :: VirtualWorkspace -> X (X ())
-workspaceSlidePrepare targetBase =
-  withWindowSet $ \ws -> do
-    let currentScreen = W.screen (W.current ws)
-        currentTag = W.tag (W.workspace (W.current ws))
-        (_, currentBase) = unmarshall currentTag
-        targetTag = marshall currentScreen targetBase
-        lookupIndex name = elemIndex name workspaceOrder
-    case (lookupIndex currentBase, lookupIndex targetBase) of
-      (Just currentIdx, Just targetIdx)
-        | currentBase /= targetBase -> do
-            let direction =
-                  if targetIdx > currentIdx
-                    then 2
-                    else 1
-                currentWins = workspaceWindows currentTag ws
-                targetWins = workspaceWindows targetTag ws
-            outgoingPairs <- setSwitchProperty direction currentWins
-            incomingPairs <- setSwitchProperty direction targetWins
-            let cleanupPairs = outgoingPairs ++ incomingPairs
-            pure (scheduleSlideCleanup cleanupPairs)
-      _ -> pure (pure ())
-  where
-    workspaceWindows tag winset =
-      let workspaceTiled =
-            maybe [] (W.integrate' . W.stack) $
-              find ((== tag) . W.tag) (W.workspaces winset)
-          floatingWins =
-            [ w
-            | (w, _) <- M.toList (W.floating winset)
-            , W.findTag w winset == Just tag
-            ]
-       in nub (workspaceTiled ++ floatingWins)
-
-setSwitchProperty :: Int -> [Window] -> X [(Window, Int)]
-setSwitchProperty _ [] = pure []
-setSwitchProperty value wins =
-  do
-    dpy <- asks display
-    atom <- io $ X.internAtom dpy "_MY_CUSTOM_WORKSPACE_SWITCH" False
-    let payload = [fromIntegral value]
-    io $
-      mapM_
-        (\w -> changeProperty32 dpy w atom X.cARDINAL propModeReplace payload)
-        wins
-    io $ X.sync dpy False
-    pure (map (\w -> (w, value)) wins)
-
-scheduleSlideCleanup :: [(Window, Int)] -> X ()
-scheduleSlideCleanup [] = pure ()
-scheduleSlideCleanup winVals =
-  do
-    dpy <- asks display
-    atom <- io $ X.internAtom dpy "_MY_CUSTOM_WORKSPACE_SWITCH" False
-    SlideCleanupState currentTid <- XS.get
-    case currentTid of
-      Just tid -> io $ killThread tid
-      Nothing -> pure ()
-    tid <- io . forkIO $ do
-      threadDelay 350000
-      mapM_
-        (\(w, expectedVal) -> do
-            mProp <- getWindowProperty32 dpy w atom
-            case mProp of
-              Just (val:_) | fromIntegral expectedVal == val ->
-                void $ xDeleteProperty dpy w atom
-              _ -> pure ()
-        )
-        winVals
-      X.sync dpy False
-    XS.put (SlideCleanupState (Just tid))
