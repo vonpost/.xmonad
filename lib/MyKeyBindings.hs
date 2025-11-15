@@ -47,7 +47,6 @@ import MyWindowHints
   , defaultHintConfig
   , windowHints
   )
-import XMonad.Hooks.WorkspaceSlide
 
 import qualified XMonad.Util.ExtensibleState as XS
 import qualified Graphics.X11.Xlib as X
@@ -57,6 +56,52 @@ import Graphics.X11.Xlib.Extras
   , xDeleteProperty
   , propModeReplace
   )
+
+-- Track whether gaps are currently enabled
+newtype GapsOn = GapsOn { unGapsOn :: Bool }
+        deriving (Read, Show, Typeable)
+instance ExtensionClass GapsOn where
+  initialValue = GapsOn True
+  extensionType = PersistentExtension
+
+picomFlagAtomName :: String
+picomFlagAtomName = "_XMONAD_NOGAPS"   -- 1 = no gaps (disable shadows), 0 = gaps on (allow them)
+
+setPropOn :: X.Window -> Bool -> X ()
+setPropOn w gapsOn = withDisplay $ \d -> io $ do
+  a <- X.internAtom d picomFlagAtomName False
+  c <- X.internAtom d "CARDINAL" False
+  let v = if gapsOn then 0 else 1   -- gaps on  -> 0
+                    -- gaps off -> 1
+  changeProperty32 d w a c propModeReplace [fromIntegral v]
+
+applyPropToAll :: Bool -> X ()
+applyPropToAll gapsOn = withWindowSet $ \ws ->
+  mapM_ (\w -> setPropOn w gapsOn) (W.allWindows ws)
+
+setSpacingEnabled bool = do
+  setWindowSpacingEnabled bool
+  setScreenSpacingEnabled bool
+
+toggleGapsAndPicom = do
+  GapsOn cur <- XS.get
+  let newState = not cur   -- flip our state
+
+  -- Set spacing based on explicit true/false
+  setSpacingEnabled newState
+
+  -- Tag/untag windows for picom (you already have this)
+  applyPropToAll newState
+
+  -- commit the new state
+  XS.put (GapsOn newState)
+
+gapsOnManageHook :: ManageHook
+gapsOnManageHook =  do
+                        w <- ask
+                        liftX $ XS.get >>= \(GapsOn cur) -> setPropOn w cur
+                        idHook
+
 myKeys = customKeys removedKeys addedKeys
 
 -- Quake-style dropdown terminal (Alacritty)
@@ -122,7 +167,7 @@ addedKeys conf@XConfig {modMask = modm} =
     -- Modify spacing
   , ((modm, xK_Right), incScreenWindowSpacing 10)
   , ((modm, xK_Left), decScreenWindowSpacing 10)
-  , ((modm, xK_Up), toggleScreenSpacingEnabled >> toggleWindowSpacingEnabled)
+  , ((modm, xK_Up), toggleGapsAndPicom)
 
   -- Window hints
   , ((modm, xK_g), windowHints windowHintConfig)
@@ -208,7 +253,7 @@ addedKeys conf@XConfig {modMask = modm} =
       screenWorkspace sc
       warpToScreen sc (0.5) (0.5)
     goToWorkspace name message = do
-      workspaceSlidePrepare onCurrentScreenX toggleOrView name
+      toggleOrView name
       spawn ("notify-send \"" ++ message ++ "\"")
     screenKeys =
       [
@@ -269,14 +314,6 @@ toggleHidden' state = if state then (popNewestHiddenWindow) >> return False  els
 toggleHidden = do state <- XS.get
                   state' <- toggleHidden' state
                   XS.put state'
-
-onCurrentScreenX :: (PhysicalWorkspace -> X a) -> (VirtualWorkspace -> X a)
-onCurrentScreenX f vwsp =
-  withCurrentScreen (f . flip marshall vwsp)
-
-withCurrentScreen :: (ScreenId -> X a) -> X a
-withCurrentScreen f =
-  withWindowSet (f . W.screen . W.current)
 
 languages = ["se", "us"]
 toggleLanguage = do status <- runProcessWithInput "setxkbmap" ["-query"] ""

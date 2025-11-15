@@ -13,8 +13,14 @@ import XMonad.Hooks.ManageHelpers
 import XMonad.Util.NamedScratchpad
 import XMonad.Layout.Hidden
 import XMonad.Layout.Spacing
-import XMonad.Layout.IndependentScreens
 import XMonad.Layout.NoBorders
+import XMonad.Layout.LimitWindows
+import XMonad.Layout.PerWorkspace (onWorkspace)
+import XMonad.Layout.SimplestFloat
+
+
+
+
 
 
 main :: IO ()
@@ -23,19 +29,23 @@ main =
     $ withNavigation2DConfig def { defaultTiledNavigation = hybridOf lineNavigation centerNavigation }
     $ myConfig
 
+myDefaultLayout = limitWindows 4 $ spacingRaw True (Border 30 30 30 30) True (Border 30 30 30 30) True
+                         $ hiddenWindows $ smartBorders emptyBSP
+myFloatLayout = simplestFloat
 myConfig = ewmhFullscreen $ ewmh def
-  { borderWidth        = 3
-  , focusedBorderColor = "#000000"
-  , normalBorderColor = "#000000"
+  { borderWidth        = 5
+  , focusedBorderColor = "#000000" --"#C0C0C0"
+  , normalBorderColor =  "#000000" --"#C0C0C0"
   , startupHook = startupHook def <+> setWMName "LG3D" -- <+> pywalStartupHook
   , logHook = logHook def -- <+> pywalLogHook
   , handleEventHook = handleEventHook def
   , focusFollowsMouse  = False
   , keys               = myKeys
-  , layoutHook         = spacingRaw True (Border 10 10 10 10) True (Border 10 10 10 10) True
-                         $ hiddenWindows $ smartBorders emptyBSP
+  , layoutHook         = onWorkspace "etc" myFloatLayout  $ myDefaultLayout
+
+
   , modMask            = mod4Mask
-  , manageHook         = manageSpawn <+> manageHook def <+> (namedScratchpadManageHook myScratchpads) <+> fullscreenManageHook
+  , manageHook         = manageSpawn <+> manageHook def <+> (namedScratchpadManageHook myScratchpads) <+> fullscreenManageHook <+> gapsOnManageHook
   , terminal           = "alacrittyc"
-  , workspaces         = withScreens 1 [ "browse", "code", "read", "chat", "etc"]
+  , workspaces         =  [ "browse", "code", "read", "chat", "etc"]
   }
