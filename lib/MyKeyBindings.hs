@@ -157,6 +157,7 @@ addedKeys conf@XConfig {modMask = modm} =
   [ -- Application launcher
     ((0, 0xff61) , spawn "rofi -combi-modi window,drun -show combi -modi combi")
 
+  , ((modm, xK_p) , spawn "rofi-rbw")
     -- Terminal
   , ((modm, xK_Return), spawn $ XMonad.terminal conf)
     -- Emacs
